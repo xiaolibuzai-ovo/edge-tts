@@ -1,4 +1,4 @@
-package communicate
+package edge_tts
 
 import (
 	"bytes"
@@ -8,84 +8,84 @@ import (
 	"fmt"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
-	"html"
 	"io"
 	"net/http"
 	"runtime/debug"
 	"strings"
 	"time"
-	"unicode"
-	"wsDemo/aaaa/constant"
-)
-
-var (
-	escapeReplacer = strings.NewReplacer(">", "&gt;", "<", "&lt;")
 )
 
 type Communicate struct {
 	text string
+	*config
+	*audioOption
+}
 
+type audioOption struct {
 	audioDataIndex int
 	prevIdx        int
 	shiftTime      int
 	finalUtterance map[int]int
-	op             chan map[string]interface{}
-	opt            *CommunicateOption
 }
 
-type CommunicateOption struct {
-	Voice  string
-	Pitch  string
-	Rate   string
-	Volume string
-
-	HttpProxy        string
-	Socket5Proxy     string
-	Socket5ProxyUser string
-	Socket5ProxyPass string
-	IgnoreSSL        bool
+type config struct {
+	voice  string
+	pitch  string
+	rate   string
+	volume string
 }
 
-func NewCommunicate(text string, opt *CommunicateOption) (*Communicate, error) {
-	if opt == nil {
-		opt = &CommunicateOption{}
+type audioData struct {
+	Data  []byte
+	Index int
+}
+
+func NewCommunicate() *Communicate {
+	communicate := &Communicate{
+		config:      &config{},
+		audioOption: &audioOption{},
 	}
-	opt.CheckAndApplyDefaultOption()
-
-	if err := WithCommunicateOption(opt); err != nil {
-		return nil, err
-	}
-	return &Communicate{
-		text: text,
-		opt:  opt,
-	}, nil
+	return communicate
 }
 
-func (c *CommunicateOption) CheckAndApplyDefaultOption() {
+func (c *Communicate) SetText(text string) *Communicate {
+	c.text = text
+	return c
+}
+
+func (c *Communicate) SetVoice(voice string) *Communicate {
+	c.voice = voice
+	return c
+}
+
+func (c *Communicate) SetPitch(pitch string) *Communicate {
+	c.pitch = pitch
+	return c
+}
+func (c *Communicate) SetRate(rate string) *Communicate {
+	c.rate = rate
+	return c
+}
+
+func (c *Communicate) SetVolume(volume string) *Communicate {
+	c.volume = volume
+	return c
+}
+
+func (c *Communicate) checkAndApplyDefaultAudioOption() {
 	// Default values
-	if c.Voice == "" {
-		c.Voice = constant.DefaultVoice
+	if c.voice == "" {
+		c.voice = DefaultVoice
 	}
-	if c.Pitch == "" {
-		c.Pitch = "+0Hz"
+	if c.pitch == "" {
+		c.pitch = DefaultPitch
 	}
-	if c.Rate == "" {
-		c.Rate = "+0%"
+	if c.rate == "" {
+		c.rate = DefaultRate
 	}
-	if c.Volume == "" {
-		c.Volume = "+0%"
+	if c.volume == "" {
+		c.volume = DefaultVolume
 	}
-}
-
-func makeWsHeaders() http.Header {
-	header := make(http.Header)
-	header.Set("Pragma", "no-cache")
-	header.Set("Cache-Control", "no-cache")
-	header.Set("Origin", "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold")
-	header.Set("Accept-Encoding", "gzip, deflate, br")
-	header.Set("Accept-Language", "en-US,en;q=0.9")
-	header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.77 Safari/537.36 Edg/91.0.864.41")
-	return header
 }
 
 func splitTextByByteLength(text string, byteLength int) [][]byte {
@@ -117,37 +117,14 @@ func splitTextByByteLength(text string, byteLength int) [][]byte {
 	return result
 }
 
-func escape(data string) string {
-	// Must do ampersand first
-	entities := make(map[string]string)
-	data = html.EscapeString(data)
-	data = escapeReplacer.Replace(data)
-	if entities != nil {
-		data = replaceWithDict(data, entities)
-	}
-	return data
-}
-
-func replaceWithDict(data string, entities map[string]string) string {
-	for key, value := range entities {
-		data = strings.ReplaceAll(data, key, value)
-	}
-	return data
-}
-
-type audioData struct {
-	Data  []byte
-	Index int
-}
-
 // WriteStreamTo  write audio stream to io.WriteCloser
 func (c *Communicate) WriteStreamTo(rc io.Writer) error {
-	op, err := c.stream()
+	output, err := c.stream()
 	if err != nil {
 		return err
 	}
 	audioBinaryData := make([][][]byte, c.audioDataIndex)
-	for data := range op {
+	for data := range output {
 		if _, ok := data["end"]; ok {
 			if len(audioBinaryData) == c.audioDataIndex {
 				break
@@ -171,20 +148,32 @@ func (c *Communicate) WriteStreamTo(rc io.Writer) error {
 }
 
 func (c *Communicate) stream() (<-chan map[string]interface{}, error) {
+	c.checkAndApplyDefaultAudioOption()
 	texts := splitTextByByteLength(
 		escape(removeIncompatibleCharacters(c.text)),
-		calculateMaxMessageSize(c.opt.Pitch, c.opt.Voice, c.opt.Rate, c.opt.Volume),
+		calculateMaxMessageSize(c.pitch, c.voice, c.rate, c.volume),
 	)
-	c.audioDataIndex = len(texts)
 
+	c.audioDataIndex = len(texts)
 	c.finalUtterance = make(map[int]int)
 	c.prevIdx = -1
 	c.shiftTime = -1
 
+	makeWsHeaders := func() http.Header {
+		header := make(http.Header)
+		header.Set("Pragma", "no-cache")
+		header.Set("Cache-Control", "no-cache")
+		header.Set("Origin", "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold")
+		header.Set("Accept-Encoding", "gzip, deflate, br")
+		header.Set("Accept-Language", "en-US,en;q=0.9")
+		header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.77 Safari/537.36 Edg/91.0.864.41")
+		return header
+	}
+
 	output := make(chan map[string]interface{})
 
 	for idx, text := range texts {
-		wsURL := constant.EdgeWssEndpoint + "&ConnectionId=" + generateConnectID()
+		wsURL := EdgeWssEndpoint + "&ConnectionId=" + generateConnectID()
 		dialer := websocket.Dialer{}
 		conn, _, err := dialer.Dial(wsURL, makeWsHeaders())
 		if err != nil {
@@ -192,11 +181,12 @@ func (c *Communicate) stream() (<-chan map[string]interface{}, error) {
 		}
 
 		currentTime := currentTimeInMST()
-		err = c.sendConfig(conn, currentTime)
+		err = c.sendCommandRequest(conn, currentTime)
 		if err != nil {
 			conn.Close()
 			return nil, err
 		}
+
 		err = c.sendSSML(conn, currentTime, text)
 		if err != nil {
 			conn.Close()
@@ -205,12 +195,12 @@ func (c *Communicate) stream() (<-chan map[string]interface{}, error) {
 
 		go c.handleStream(conn, output, idx)
 	}
-	c.op = output
+
 	return output, nil
 }
 
 // Sends the request to the service.
-func (c *Communicate) sendConfig(conn *websocket.Conn, currentTime string) error {
+func (c *Communicate) sendCommandRequest(conn *websocket.Conn, currentTime string) error {
 	// Prepare the request to be sent to the service.
 	//
 	// Note sentenceBoundaryEnabled and wordBoundaryEnabled are actually supposed
@@ -235,33 +225,12 @@ func (c *Communicate) sendSSML(conn *websocket.Conn, currentTime string, text []
 			ssmlHeadersAppendExtraData(
 				generateConnectID(),
 				currentTime,
-				makeSsml(string(text), c.opt.Pitch, c.opt.Voice, c.opt.Rate, c.opt.Volume),
+				makeSsml(string(text), c.pitch, c.voice, c.rate, c.volume),
 			),
 		))
 }
 
-type unknownResponse struct {
-	Message string
-}
-
-type unexpectedResponse struct {
-	Message string
-}
-
-type noAudioReceived struct {
-	Message string
-}
-
-type webSocketError struct {
-	Message string
-}
-
 func (c *Communicate) handleStream(conn *websocket.Conn, output chan map[string]interface{}, idx int) {
-	// download indicates whether we should be expecting audio data,
-	// this is so what we avoid getting binary data from the websocket
-	// and falsely thinking it's audio data.
-	downloadAudio := false
-
 	// audioWasReceived indicates whether we have received audio data
 	// from the websocket. This is so we can raise an exception if we
 	// don't receive any audio data.
@@ -270,7 +239,8 @@ func (c *Communicate) handleStream(conn *websocket.Conn, output chan map[string]
 	defer conn.Close()
 	defer func() {
 		if err := recover(); err != nil {
-			fmt.Printf("communicate.Stream recovered from panic: %v stack: %s", err, string(debug.Stack()))
+			fmt.Printf("[handleStream] recovered from panic: %v stack: %s", err, string(debug.Stack()))
+			return
 		}
 	}()
 
@@ -280,7 +250,7 @@ func (c *Communicate) handleStream(conn *websocket.Conn, output chan map[string]
 			if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 				// WebSocket error
 				output <- map[string]interface{}{
-					"error": webSocketError{Message: err.Error()},
+					"error": fmt.Sprintf("websocket err,err=%v", err),
 				}
 			}
 			break
@@ -291,20 +261,19 @@ func (c *Communicate) handleStream(conn *websocket.Conn, output chan map[string]
 			path := parameters["Path"]
 
 			switch path {
-			case "turn.start":
-				downloadAudio = true
-			case "turn.end":
+			case PathTurnStart:
+				// pass
+			case PathTurnEnd:
 				output <- map[string]interface{}{
 					"end": "",
 				}
-				downloadAudio = false
 				break // End of audio data
-
-			case "audio.metadata":
-				meta, err := getMetaHubFrom(data)
+			case PathAudioMetadata:
+				// parse meta data
+				meta, err := getMetaAudioFrom(data)
 				if err != nil {
 					output <- map[string]interface{}{
-						"error": unknownResponse{Message: err.Error()},
+						"error": fmt.Sprintf("[handleStream] getMetaAudioFrom err,err=%v", err),
 					}
 					break
 				}
@@ -328,36 +297,30 @@ func (c *Communicate) handleStream(conn *websocket.Conn, output chan map[string]
 						// do nothing
 					default:
 						output <- map[string]interface{}{
-							"error": unknownResponse{Message: "Unknown metadata type: " + metaType},
+							"error": fmt.Sprintf("Unknown metadata type: %s", metaType),
 						}
 						break
 					}
 				}
-			case "response":
-				// do nothing
+			case PathResponse:
+				// pass
 			default:
 				output <- map[string]interface{}{
-					"error": unknownResponse{Message: "The response from the service is not recognized.\n" + string(message)},
+					"error": fmt.Sprintf("The response from the service is not recognized"),
 				}
 				break
 			}
 		case websocket.BinaryMessage:
-			if !downloadAudio {
-				output <- map[string]interface{}{
-					"error": unknownResponse{"We received a binary message, but we are not expecting one."},
-				}
-			}
-
 			if len(message) < 2 {
 				output <- map[string]interface{}{
-					"error": unknownResponse{"We received a binary message, but it is missing the header length."},
+					"error": fmt.Sprintf("received a binary message, but it is missing the header length."),
 				}
 			}
 
 			headerLength := int(binary.BigEndian.Uint16(message[:2]))
 			if len(message) < headerLength+2 {
 				output <- map[string]interface{}{
-					"error": unknownResponse{"We received a binary message, but it is missing the audio data."},
+					"error": fmt.Sprintf("received a binary message, but it is missing the audio data."),
 				}
 			}
 
@@ -373,15 +336,11 @@ func (c *Communicate) handleStream(conn *websocket.Conn, output chan map[string]
 		default:
 			if message != nil {
 				output <- map[string]interface{}{
-					"error": webSocketError{
-						Message: string(message),
-					},
+					"error": fmt.Sprintf("websocket message type err"),
 				}
 			} else {
 				output <- map[string]interface{}{
-					"error": webSocketError{
-						Message: "Unknown error",
-					},
+					"error": fmt.Sprintf("unknow websocket error"),
 				}
 			}
 		}
@@ -389,7 +348,7 @@ func (c *Communicate) handleStream(conn *websocket.Conn, output chan map[string]
 	}
 	if !audioWasReceived {
 		output <- map[string]interface{}{
-			"error": noAudioReceived{Message: "No audio was received. Please verify that your parameters are correct."},
+			"error": fmt.Sprintf("No audio was received. Please verify that your parameters are correct."),
 		}
 	}
 }
@@ -402,26 +361,23 @@ func sumWithMap(idx int, m map[int]int) int {
 	return sumResult
 }
 
-type textEntry struct {
-	Text         string `json:"text"`
-	BoundaryType string `json:"BoundaryType"`
-	Length       int64  `json:"Length"`
-}
-type dataEntry struct {
-	Offset   int       `json:"Offset"`
-	Duration int       `json:"Duration"`
-	Text     textEntry `json:"text"`
-}
-type metaDataEntry struct {
-	Type string    `json:"Type"`
-	Data dataEntry `json:"Data"`
-}
-type metaHub struct {
-	Metadata []metaDataEntry `json:"Metadata"`
+type metaAudio struct {
+	Metadata []struct {
+		Type string `json:"Type"`
+		Data struct {
+			Offset   int `json:"Offset"`
+			Duration int `json:"Duration"`
+			Text     struct {
+				Text         string `json:"text"`
+				BoundaryType string `json:"BoundaryType"`
+				Length       int64  `json:"Length"`
+			} `json:"text"`
+		} `json:"Data"`
+	} `json:"Metadata"`
 }
 
-func getMetaHubFrom(data []byte) (*metaHub, error) {
-	metadata := &metaHub{}
+func getMetaAudioFrom(data []byte) (*metaAudio, error) {
+	metadata := &metaAudio{}
 	err := json.Unmarshal(data, &metadata)
 	if err != nil {
 		return nil, fmt.Errorf("err=%s, data=%s", err.Error(), string(data))
@@ -444,23 +400,8 @@ func processWebsocketTextMessage(data []byte) (map[string]string, []byte) {
 	return headers, data[headerEndIndex+4:]
 }
 
-func removeIncompatibleCharacters(str string) string {
-	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) && r != '\t' && r != '\n' && r != '\r' {
-			return ' '
-		}
-		return r
-	}, str)
-}
-
 func generateConnectID() string {
 	return strings.ReplaceAll(uuid.New().String(), "-", "")
-}
-
-func calculateMaxMessageSize(pitch, voice string, rate string, volume string) int {
-	websocketMaxSize := 1 << 16
-	overheadPerMessage := len(ssmlHeadersAppendExtraData(generateConnectID(), currentTimeInMST(), makeSsml("", pitch, voice, rate, volume))) + 50
-	return websocketMaxSize - overheadPerMessage
 }
 
 func currentTimeInMST() string {

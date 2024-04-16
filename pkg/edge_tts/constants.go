@@ -1,4 +1,4 @@
-package constant
+package edge_tts
 
 const (
 	trustedClientToken = "6A5AA1D4EAFF4E9FB37E23D68491D6F4"
@@ -7,5 +7,15 @@ const (
 )
 
 const (
-	DefaultVoice = "zh-CN-XiaoxiaoNeural"
+	PathTurnStart     = "turn.start"
+	PathTurnEnd       = "turn.end"
+	PathAudioMetadata = "audio.metadata"
+	PathResponse      = "response"
+)
+
+const (
+	DefaultVoice  = "zh-CN-XiaoxiaoNeural"
+	DefaultPitch  = "+0Hz"
+	DefaultRate   = "+0%"
+	DefaultVolume = "+0%"
 )
