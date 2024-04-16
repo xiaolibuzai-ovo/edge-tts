@@ -27,15 +27,6 @@ func (t *ttsClient) TextToSpeech(ctx context.Context, text string, voice string)
 		fmt.Println(err)
 		return nil, err
 	}
-	if t.communicate == nil {
-		fmt.Println("nil")
-	}
-	if t.communicate.SetText(text) == nil {
-		fmt.Println("!!!nil")
-	}
-	if t.communicate.SetText(text).SetVoice(voice) == nil {
-		fmt.Println("!!!!!!!!!nil")
-	}
 	err = t.communicate.SetText(text).SetVoice(voice).WriteStreamTo(audio)
 	if err != nil {
 		return nil, err
