@@ -1,16 +1,14 @@
 package edge_tts
 
 import (
-	"fmt"
 	edge_tts "github.com/xiaolibuzai-ovo/edge-tts/pkg/edge_tts"
 	"golang.org/x/net/context"
 	"io"
-	"os"
 )
 
 type EdgeTTS interface {
-	TextToSpeech(ctx context.Context, text string, voice string) (io.Reader, error)
-	VoiceList()
+	TextToSpeech(ctx context.Context, text string, voice string) (io.ReadCloser, error)
+	VoiceList(ctx context.Context) ([]edge_tts.VoiceItem, error)
 }
 
 type ttsClient struct {
@@ -21,20 +19,18 @@ func NewEdgeTTS() EdgeTTS {
 	return &ttsClient{communicate: edge_tts.NewCommunicate()}
 }
 
-func (t *ttsClient) TextToSpeech(ctx context.Context, text string, voice string) (io.Reader, error) {
-	audio, err := os.OpenFile("test.mp3", os.O_RDWR|os.O_CREATE, 0666)
-	if err != nil {
-		fmt.Println(err)
-		return nil, err
-	}
-	err = t.communicate.SetText(text).SetVoice(voice).WriteStreamTo(audio)
+func (t *ttsClient) TextToSpeech(ctx context.Context, text string, voice string) (io.ReadCloser, error) {
+	pr, err := t.communicate.SetText(text).SetVoice(voice).ReadStream()
 	if err != nil {
 		return nil, err
 	}
-	return nil, nil
+	return pr, nil
 }
 
-func (t ttsClient) VoiceList() {
-
-	return
+func (t *ttsClient) VoiceList(ctx context.Context) ([]edge_tts.VoiceItem, error) {
+	list, err := edge_tts.VoiceList()
+	if err != nil {
+		return nil, err
+	}
+	return list, nil
 }

@@ -1,10 +1,40 @@
 package edge_tts
 
 import (
+	"bytes"
 	"html"
 	"strings"
 	"unicode"
 )
+
+func splitTextByByteLength(text string, byteLength int) [][]byte {
+	var result [][]byte
+	textBytes := []byte(text)
+
+	if byteLength > 0 {
+		for len(textBytes) > byteLength {
+			splitAt := bytes.LastIndexByte(textBytes[:byteLength], ' ')
+			if splitAt == -1 || splitAt == 0 {
+				splitAt = byteLength
+			} else {
+				splitAt++
+			}
+
+			trimmedText := bytes.TrimSpace(textBytes[:splitAt])
+			if len(trimmedText) > 0 {
+				result = append(result, trimmedText)
+			}
+			textBytes = textBytes[splitAt:]
+		}
+	}
+
+	trimmedText := bytes.TrimSpace(textBytes)
+	if len(trimmedText) > 0 {
+		result = append(result, trimmedText)
+	}
+
+	return result
+}
 
 func escape(data string) string {
 	// Must do ampersand first

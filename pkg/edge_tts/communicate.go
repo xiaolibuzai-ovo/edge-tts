@@ -88,63 +88,40 @@ func (c *Communicate) checkAndApplyDefaultAudioOption() {
 	}
 }
 
-func splitTextByByteLength(text string, byteLength int) [][]byte {
-	var result [][]byte
-	textBytes := []byte(text)
-
-	if byteLength > 0 {
-		for len(textBytes) > byteLength {
-			splitAt := bytes.LastIndexByte(textBytes[:byteLength], ' ')
-			if splitAt == -1 || splitAt == 0 {
-				splitAt = byteLength
-			} else {
-				splitAt++
-			}
-
-			trimmedText := bytes.TrimSpace(textBytes[:splitAt])
-			if len(trimmedText) > 0 {
-				result = append(result, trimmedText)
-			}
-			textBytes = textBytes[splitAt:]
-		}
-	}
-
-	trimmedText := bytes.TrimSpace(textBytes)
-	if len(trimmedText) > 0 {
-		result = append(result, trimmedText)
-	}
-
-	return result
-}
-
-// WriteStreamTo  write audio stream to io.WriteCloser
-func (c *Communicate) WriteStreamTo(rc io.Writer) error {
+// ReadStream  write audio stream to io.ReadCloser
+func (c *Communicate) ReadStream() (io.ReadCloser, error) {
 	output, err := c.stream()
 	if err != nil {
-		return err
+		return nil, err
 	}
+	// 创建管道
+	pr, pw := io.Pipe()
 	audioBinaryData := make([][][]byte, c.audioDataIndex)
-	for data := range output {
-		if _, ok := data["end"]; ok {
-			if len(audioBinaryData) == c.audioDataIndex {
-				break
+	go func() {
+		defer pw.Close()
+
+		for data := range output {
+			if _, ok := data["end"]; ok {
+				if len(audioBinaryData) == c.audioDataIndex {
+					break
+				}
+			}
+			if t, ok := data["type"]; ok && t == "audio" {
+				data := data["data"].(audioData)
+				audioBinaryData[data.Index] = append(audioBinaryData[data.Index], data.Data)
+			}
+			if e, ok := data["error"]; ok {
+				fmt.Printf("has error err: %v\n", e)
 			}
 		}
-		if t, ok := data["type"]; ok && t == "audio" {
-			data := data["data"].(audioData)
-			audioBinaryData[data.Index] = append(audioBinaryData[data.Index], data.Data)
-		}
-		if e, ok := data["error"]; ok {
-			fmt.Printf("has error err: %v\n", e)
-		}
-	}
 
-	for _, dataSlice := range audioBinaryData {
-		for _, data := range dataSlice {
-			rc.Write(data)
+		for _, dataSlice := range audioBinaryData {
+			for _, data := range dataSlice {
+				pw.Write(data)
+			}
 		}
-	}
-	return nil
+	}()
+	return pr, nil
 }
 
 func (c *Communicate) stream() (<-chan map[string]interface{}, error) {

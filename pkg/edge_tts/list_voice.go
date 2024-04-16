@@ -8,15 +8,21 @@ import (
 )
 
 type VoiceItem struct {
-	Name        string `json:"Name"`
-	Gender      string `json:"Gender"`
-	Locale      string `json:"Locale"`
-	DisplayName string `json:"DisplayName"`
+	Name           string `json:"Name"`
+	ShortName      string `json:"ShortName"`
+	Gender         string `json:"Gender"`
+	Locale         string `json:"Locale"`
+	SuggestedCodec string `json:"SuggestedCodec"`
+	FriendlyName   string `json:"FriendlyName"`
+	Status         string `json:"Status"`
+	VoiceTag       struct {
+		ContentCategories  []string `json:"ContentCategories"`
+		VoicePersonalities []string `json:"VoicePersonalities"`
+	} `json:"VoiceTag"`
 }
 
-func listVoices() ([]VoiceItem, error) {
+func VoiceList() ([]VoiceItem, error) {
 	client := &http.Client{}
-
 	req, err := http.NewRequest("GET", VoiceListEndpoint, nil)
 	if err != nil {
 		return nil, err
