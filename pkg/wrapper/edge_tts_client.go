@@ -1,4 +1,4 @@
-package edge_tts
+package edgeTTS
 
 import (
 	edge_tts "github.com/xiaolibuzai-ovo/edge-tts/pkg/edge_tts"

@@ -1,4 +1,4 @@
-package edge_tts
+package edgeTTS
 
 import (
 	"fmt"
