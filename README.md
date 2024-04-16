@@ -8,7 +8,7 @@ Use Microsoft Edge's online text-to-speech service from go WITHOUT needing Micro
 go get -u github.com/xiaolibuzai-ovo/edge-tts
 ```
 
-## Running
+## Example
 
 ### Text-to-Speech
 
